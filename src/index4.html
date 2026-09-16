@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>マイクモニター</title>
+
+<style>
+    body {
+        margin: 0;
+        padding: 30px;
+        background: #111;
+        color: #fff;
+        font-family: sans-serif;
+        text-align: center;
+    }
+
+    h1 {
+        margin-bottom: 30px;
+    }
+
+    button {
+        padding: 12px 24px;
+        font-size: 16px;
+        cursor: pointer;
+        border: none;
+        border-radius: 6px;
+        background: #2196f3;
+        color: white;
+    }
+
+    button:hover {
+        background: #1976d2;
+    }
+
+    #meter {
+        width: 80%;
+        max-width: 700px;
+        height: 30px;
+        margin: 30px auto 10px;
+        background: #333;
+        border-radius: 15px;
+        overflow: hidden;
+    }
+
+    #level {
+        width: 0%;
+        height: 100%;
+        background: linear-gradient(
+            to right,
+            #00c853,
+            #64dd17,
+            #ffeb3b,
+            #ff9800,
+            #f44336
+        );
+        transition: width 0.03s linear;
+    }
+
+    canvas {
+        display: block;
+        width: 80%;
+        max-width: 700px;
+        height: 200px;
+        margin: 30px auto;
+        background: #000;
+        border: 1px solid #444;
+    }
+
+    #db {
+        font-size: 24px;
+        margin-top: 15px;
+    }
+
+    #status {
+        margin-top: 15px;
+        color: #aaa;
+    }
+</style>
+</head>
+
+<body>
+
+<h1>🎙 マイクモニター</h1>
+
+<button id="startButton">マイク開始</button>
+
+<div id="status">停止中</div>
+
+<div id="meter">
+    <div id="level"></div>
+</div>
+
+<div id="db">-∞ dB</div>
+
+<canvas id="waveform" width="700" height="200"></canvas>
+
+<script>
+const startButton = document.getElementById("startButton");
+const status = document.getElementById("status");
+const level = document.getElementById("level");
+const dbDisplay = document.getElementById("db");
+const canvas = document.getElementById("waveform");
+const ctx = canvas.getContext("2d");
+
+let audioContext;
+let analyser;
+let microphone;
+let animationId;
+
+startButton.addEventListener("click", async () => {
+
+    if (audioContext) {
+        stopMicrophone();
+        return;
+    }
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+                echoCancellation: false,
+                noiseSuppression: false,
+                autoGainControl: false
+            }
+        });
+
+        audioContext = new AudioContext();
+
+        microphone = audioContext.createMediaStreamSource(stream);
+
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 2048;
+
+        microphone.connect(analyser);
+        // マイク音声をヘッドホンへ出力
+        microphone.connect(audioContext.destination);
+        
+        status.textContent = "マイク入力中";
+        startButton.textContent = "停止";
+
+        draw();
+
+    } catch (error) {
+        console.error(error);
+        status.textContent = "マイクへのアクセスに失敗しました";
+    }
+});
+
+
+function draw() {
+
+    animationId = requestAnimationFrame(draw);
+
+    const bufferLength = analyser.fftSize;
+    const dataArray = new Uint8Array(bufferLength);
+
+    analyser.getByteTimeDomainData(dataArray);
+
+    // 波形描画
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "#00ff88";
+
+    ctx.beginPath();
+
+    const sliceWidth = canvas.width / bufferLength;
+    let x = 0;
+
+    for (let i = 0; i < bufferLength; i++) {
+
+        const v = dataArray[i] / 128.0;
+        const y = v * canvas.height / 2;
+
+        if (i === 0) {
+            ctx.moveTo(x, y);
+        } else {
+            ctx.lineTo(x, y);
+        }
+
+        x += sliceWidth;
+    }
+
+    ctx.lineTo(canvas.width, canvas.height / 2);
+    ctx.stroke();
+
+
+    // 音量計算
+    let sum = 0;
+
+    for (let i = 0; i < bufferLength; i++) {
+        const value = (dataArray[i] - 128) / 128;
+        sum += value * value;
+    }
+
+    const rms = Math.sqrt(sum / bufferLength);
+
+    // dBFS
+    let db;
+
+    if (rms > 0) {
+        db = 20 * Math.log10(rms);
+    } else {
+        db = -Infinity;
+    }
+
+    dbDisplay.textContent =
+        db === -Infinity
+            ? "-∞ dB"
+            : `${db.toFixed(1)} dB`;
+
+    // メーター
+    const percentage = Math.max(
+        0,
+        Math.min(100, (db + 60) / 60 * 100)
+    );
+
+    level.style.width = percentage + "%";
+}
+
+
+function stopMicrophone() {
+
+    cancelAnimationFrame(animationId);
+
+    if (microphone) {
+        microphone.disconnect();
+    }
+
+    if (audioContext) {
+        audioContext.close();
+    }
+
+    audioContext = null;
+    microphone = null;
+    analyser = null;
+
+    level.style.width = "0%";
+    dbDisplay.textContent = "-∞ dB";
+    status.textContent = "停止中";
+    startButton.textContent = "マイク開始";
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+</script>
+
+</body>
+</html>
