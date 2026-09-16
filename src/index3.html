@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>正弦波ジェネレーター</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 600px;
+      margin: 40px auto;
+      padding: 20px;
+    }
+
+    label {
+      display: block;
+      margin-top: 15px;
+      margin-bottom: 5px;
+    }
+
+    input, select, button {
+      font-size: 16px;
+      padding: 8px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    button {
+      margin-top: 20px;
+      cursor: pointer;
+    }
+
+    #status {
+      margin-top: 15px;
+      color: #555;
+    }
+  </style>
+</head>
+
+<body>
+
+  <h1>正弦波ジェネレーター</h1>
+
+  <label for="frequency">周波数 (Hz)</label>
+  <input
+    id="frequency"
+    type="number"
+    min="1"
+    max="20000"
+    value="440"
+    step="1"
+  >
+
+  <label for="outputDevice">音声出力先</label>
+  <select id="outputDevice">
+    <option value="">既定の出力先</option>
+  </select>
+
+  <button id="startButton">▶ 再生</button>
+  <button id="stopButton">■ 停止</button>
+
+  <div id="status">停止中</div>
+
+  <script>
+    let audioContext = null;
+    let oscillator = null;
+    let gainNode = null;
+
+    const frequencyInput = document.getElementById("frequency");
+    const outputDevice = document.getElementById("outputDevice");
+    const startButton = document.getElementById("startButton");
+    const stopButton = document.getElementById("stopButton");
+    const status = document.getElementById("status");
+
+    // 音声出力デバイス一覧を取得
+    async function loadOutputDevices() {
+      try {
+        // デバイス情報取得の許可を得る
+        const tempStream = await navigator.mediaDevices.getUserMedia({
+          audio: true
+        });
+
+        tempStream.getTracks().forEach(track => track.stop());
+
+        const devices = await navigator.mediaDevices.enumerateDevices();
+
+        outputDevice.innerHTML =
+          '<option value="">既定の出力先</option>';
+
+        devices
+          .filter(device => device.kind === "audiooutput")
+          .forEach(device => {
+            const option = document.createElement("option");
+
+            option.value = device.deviceId;
+            option.textContent =
+              device.label || `音声出力 ${device.deviceId.slice(0, 8)}`;
+
+            outputDevice.appendChild(option);
+          });
+
+        status.textContent = "出力デバイスを取得しました";
+
+      } catch (error) {
+        console.error(error);
+        status.textContent =
+          "音声デバイスへのアクセスが許可されませんでした";
+      }
+    }
+
+    // 正弦波を開始
+    async function startTone() {
+      const frequency = Number(frequencyInput.value);
+
+      if (!frequency || frequency < 1 || frequency > 20000) {
+        alert("1～20000 Hzの範囲で入力してください");
+        return;
+      }
+
+      // AudioContextを作成
+      if (!audioContext) {
+        audioContext = new AudioContext();
+      }
+
+      // 停止中なら再開
+      if (audioContext.state === "suspended") {
+        await audioContext.resume();
+      }
+
+      // 既に再生中なら一旦停止
+      stopTone();
+
+      oscillator = audioContext.createOscillator();
+      gainNode = audioContext.createGain();
+
+      // 正弦波
+      oscillator.type = "sine";
+
+      // 周波数
+      oscillator.frequency.value = frequency;
+
+      // 音量
+      // 大きすぎるとスピーカーや耳に危険なので小さめ
+      gainNode.gain.value = 0.1;
+
+      // 接続
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      // 開始
+      oscillator.start();
+
+      status.textContent = `${frequency} Hz を再生中`;
+    }
+
+    // 正弦波を停止
+    function stopTone() {
+      if (oscillator) {
+        try {
+          oscillator.stop();
+        } catch (e) {
+          // 既に停止済み
+        }
+
+        oscillator.disconnect();
+        oscillator = null;
+      }
+
+      if (gainNode) {
+        gainNode.disconnect();
+        gainNode = null;
+      }
+
+      status.textContent = "停止中";
+    }
+
+    // 出力先変更
+    outputDevice.addEventListener("change", async () => {
+      const deviceId = outputDevice.value;
+
+      if (!audioContext) {
+        audioContext = new AudioContext();
+      }
+
+      if (typeof audioContext.setSinkId !== "function") {
+        alert(
+          "このブラウザは音声出力先の選択に対応していません。"
+        );
+        return;
+      }
+
+      try {
+        await audioContext.setSinkId(deviceId || "default");
+
+        status.textContent =
+          deviceId
+            ? "音声出力先を変更しました"
+            : "既定の音声出力先に戻しました";
+
+      } catch (error) {
+        console.error(error);
+        alert("音声出力先を変更できませんでした");
+      }
+    });
+
+    startButton.addEventListener("click", startTone);
+    stopButton.addEventListener("click", stopTone);
+
+    // 周波数を変更したら再生中の音も変更
+    frequencyInput.addEventListener("input", () => {
+      if (oscillator) {
+        const frequency = Number(frequencyInput.value);
+
+        if (frequency >= 1 && frequency <= 20000) {
+          oscillator.frequency.setValueAtTime(
+            frequency,
+            audioContext.currentTime
+          );
+
+          status.textContent = `${frequency} Hz を再生中`;
+        }
+      }
+    });
+
+    // 初期デバイス取得
+    loadOutputDevices();
+  </script>
+
+</body>
+</html>
